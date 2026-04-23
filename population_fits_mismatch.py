@@ -109,7 +109,7 @@ def main():
 
     if args.output is None:
         args.output = os.path.join(args.path,
-            f'pop_mismatch_BtoG_N{args.N_pop}.pkl')
+            f'pop_mismatch_BtoG_N{args.N_pop}_seed{args.seed}.pkl')
 
     # Load all individual fits once
     q_true_all, q_fits_all = load_all_streams(args.path, args.nlive_ind, args.sigma_noise)
@@ -210,7 +210,7 @@ def main():
             title_kwargs={"fontsize": 16})
 
     plot_path = os.path.join(args.path,
-        f'corner_mismatch_BtoG_N{args.N_pop}.pdf')
+        f'corner_mismatch_BtoG_N{args.N_pop}_seed{args.seed}.pdf')
     fig.savefig(plot_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f'Corner plot saved to {plot_path}')
