@@ -23,8 +23,14 @@ import corner
 import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size': 18})
 
+import dynesty
+import dynesty.utils as dyut
+
 from population_fits import (
-    dynesty_fit,
+    log_likelihood,
+    prior_transform_gaussian,
+    prior_transform_uniform,
+    prior_transform_binomial,
     subset_as_binomial,
 )
 from utils import get_q
@@ -157,10 +163,28 @@ def main():
     print(f'Selected {len(idx)} streams ({n_oblate} oblate, {n_prolate} prolate)')
     print(f'True q: {np.mean(q_true_subset):.2f} +/- {np.std(q_true_subset):.2f}')
 
-    # Run single population fit
-    result = dynesty_fit(q_fits_subset, ndim=ndim, nlive=args.nlive_pop,
-                         pop_type=args.fit_dist)
-    samps = result['samps']
+    # Run single population fit (no multiprocessing pool — avoids fd leaks)
+    if args.fit_dist == 'gaussian':
+        prior_transform = prior_transform_gaussian
+    elif args.fit_dist == 'uniform':
+        prior_transform = prior_transform_uniform
+    elif args.fit_dist == 'binomial':
+        prior_transform = prior_transform_binomial
+
+    dns = dynesty.DynamicNestedSampler(
+        log_likelihood,
+        prior_transform,
+        ndim,
+        logl_args=(q_fits_subset, args.fit_dist),
+        nlive=args.nlive_pop,
+        sample='unif',
+    )
+    dns.run_nested(n_effective=10000)
+
+    res = dns.results
+    inds = np.arange(len(res.samples))
+    inds = dyut.resample_equal(inds, weights=np.exp(res.logwt - res.logz[-1]))
+    samps = res.samples[inds]
 
     mu_med = np.median(samps[:, 0])
     mu_p16, mu_p84 = np.percentile(samps[:, 0], [16, 84])

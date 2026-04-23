@@ -25,11 +25,15 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 
+import dynesty
+import dynesty.utils as dyut
+import multiprocessing as mp
+
 from population_fits import (
-    dynesty_fit,
-    subset_as_gaussian,
-    subset_as_uniform,
-    subset_as_binomial,
+    log_likelihood,
+    prior_transform_gaussian,
+    prior_transform_uniform,
+    prior_transform_binomial,
 )
 from utils import get_q
 
@@ -83,30 +87,65 @@ def load_all_streams(path, nlive_ind, sigma_noise):
 
 
 def select_subset(q_true, true_dist, true_mu, true_sigma, seed, N):
-    """Select a subset of N streams matching the true population distribution."""
+    """Select a subset of N streams matching the true population distribution.
+
+    Uses rejection sampling to weight streams by the target PDF, then
+    subsamples exactly N from the accepted pool (avoids the infinite loop
+    in the original helpers when N is very small or very large).
+    """
+    from scipy.stats import norm as sp_norm
+    rng = np.random.default_rng(seed)
+
     if true_dist == 'gaussian':
-        return subset_as_gaussian(q_true, true_mu, true_sigma, seed=seed, N=N)
+        w = sp_norm.pdf(q_true, loc=true_mu, scale=true_sigma)
     elif true_dist == 'uniform':
-        return subset_as_uniform(q_true, true_mu, true_sigma, seed=seed, N=N)
+        w = np.where((q_true >= true_mu - true_sigma) &
+                     (q_true <= true_mu + true_sigma), 1.0, 0.0)
     elif true_dist == 'binomial':
-        return subset_as_binomial(q_true, true_mu, true_sigma, seed=seed, N=N)
+        w = sp_norm.pdf(q_true, loc=true_mu, scale=true_sigma)
     else:
         raise ValueError(f'Unknown distribution: {true_dist}')
 
+    # Weighted sampling without replacement
+    p = w / w.sum()
+    idx = rng.choice(len(q_true), size=N, replace=False, p=p)
+    return idx
+
 
 def run_one_fit(q_fits_subset, fit_dist, nlive_pop):
-    """Run a single population fit and return posterior samples."""
+    """Run a single population fit and return posterior samples.
+
+    Uses a single-process dynesty sampler to avoid spawning a new
+    multiprocessing pool on every call (which exhausts file descriptors
+    over many bootstrap iterations).
+    """
     if fit_dist == 'gaussian':
         ndim = 2
+        prior_transform = prior_transform_gaussian
     elif fit_dist == 'uniform':
         ndim = 2
+        prior_transform = prior_transform_uniform
     elif fit_dist == 'binomial':
         ndim = 5
+        prior_transform = prior_transform_binomial
     else:
         raise ValueError(f'Unknown fit distribution: {fit_dist}')
 
-    result = dynesty_fit(q_fits_subset, ndim=ndim, nlive=nlive_pop, pop_type=fit_dist)
-    return result['samps']
+    dns = dynesty.DynamicNestedSampler(
+        log_likelihood,
+        prior_transform,
+        ndim,
+        logl_args=(q_fits_subset, fit_dist),
+        nlive=nlive_pop,
+        sample='unif',
+    )
+    dns.run_nested(n_effective=10000)
+
+    res = dns.results
+    inds = np.arange(len(res.samples))
+    inds = dyut.resample_equal(inds, weights=np.exp(res.logwt - res.logz[-1]))
+    samps = res.samples[inds]
+    return samps
 
 
 def main():
