@@ -180,7 +180,7 @@ def main():
     # Save results
     output_dict = {
         'samps': samps,
-        'result': result,
+        'result': res,
         'q_true_subset': q_true_subset,
         'idx': idx,
         'config': vars(args),
