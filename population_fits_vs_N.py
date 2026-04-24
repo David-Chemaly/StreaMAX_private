@@ -178,7 +178,7 @@ def main():
 
     if args.output is None:
         N_tag = '_'.join(str(n) for n in args.N_list)
-        args.output = os.path.join(args.path, f'pop_vs_N_{N_tag}_results.pkl')
+        args.output = os.path.join(args.path, f'pop_vs_N_{N_tag}_mu{args.true_mu}_results.pkl')
 
     # Load all individual fits once
     q_true_all, q_fits_all = load_all_streams(args.path, args.nlive_ind, args.sigma_noise)
