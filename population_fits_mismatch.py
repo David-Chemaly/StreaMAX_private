@@ -101,6 +101,8 @@ def main():
                         help='Population model to fit (default: gaussian = mismatch)')
     parser.add_argument('--N_pop', type=int, default=50,
                         help='Number of streams in the population')
+    parser.add_argument('--prob', type=float, default=0.5,
+                        help='Mixing weight for the first (oblate) component (default: 0.5)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for subset selection')
     parser.add_argument('--nlive_ind', type=int, default=2000,
@@ -115,7 +117,7 @@ def main():
 
     if args.output is None:
         args.output = os.path.join(args.path,
-            f'pop_mismatch_BtoG_N{args.N_pop}_seed{args.seed}.pkl')
+            f'pop_mismatch_BtoG_N{args.N_pop}_prob{args.prob}_seed{args.seed}.pkl')
 
     # Load all individual fits once
     q_true_all, q_fits_all = load_all_streams(args.path, args.nlive_ind, args.sigma_noise)
@@ -130,32 +132,13 @@ def main():
         ndim = 5
         labels = [r'$\mu_1$', r'$\mu_2$', r'$\sigma_1$', r'$\sigma_2$', r'$p$']
 
-    # Select bimodal subset with exactly N/2 per component
-    n_per_peak = args.N_pop // 2
-    rng = np.random.default_rng(args.seed)
-
-    # Oblate component: weight by N(mu1, sigma1), pick n_per_peak
-    from scipy.stats import norm
-    w1 = norm.pdf(q_true_all, args.true_mu1, args.true_sigma1)
-    p1 = w1 / w1.max()
-    oblate_pool = np.where(rng.random(len(q_true_all)) < p1)[0]
-    while len(oblate_pool) < n_per_peak:
-        oblate_pool = np.where(rng.random(len(q_true_all)) < p1)[0]
-    idx_oblate = rng.choice(oblate_pool, size=n_per_peak, replace=False)
-
-    # Prolate component: weight by N(mu2, sigma2), pick n_per_peak
-    # exclude already-selected streams
-    mask_remaining = np.ones(len(q_true_all), dtype=bool)
-    mask_remaining[idx_oblate] = False
-    remaining_idx = np.where(mask_remaining)[0]
-    w2 = norm.pdf(q_true_all[remaining_idx], args.true_mu2, args.true_sigma2)
-    p2 = w2 / w2.max()
-    prolate_pool = remaining_idx[rng.random(len(remaining_idx)) < p2]
-    while len(prolate_pool) < n_per_peak:
-        prolate_pool = remaining_idx[rng.random(len(remaining_idx)) < p2]
-    idx_prolate = rng.choice(prolate_pool, size=n_per_peak, replace=False)
-
-    idx = np.concatenate([idx_oblate, idx_prolate])
+    # Select bimodal subset using mixture weights
+    idx = subset_as_binomial(
+        q_true_all,
+        mu1=args.true_mu1, mu2=args.true_mu2,
+        sigma1=args.true_sigma1, sigma2=args.true_sigma2,
+        seed=args.seed, N=args.N_pop, prob=args.prob,
+    )
     q_fits_subset = [q_fits_all[i] for i in idx]
     q_true_subset = q_true_all[idx]
     n_oblate = np.sum(q_true_subset < 1.0)
@@ -234,7 +217,7 @@ def main():
             title_kwargs={"fontsize": 16})
 
     plot_path = os.path.join(args.path,
-        f'corner_mismatch_BtoG_N{args.N_pop}_seed{args.seed}.pdf')
+        f'corner_mismatch_BtoG_N{args.N_pop}_prob{args.prob}_seed{args.seed}.pdf')
     fig.savefig(plot_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f'Corner plot saved to {plot_path}')
