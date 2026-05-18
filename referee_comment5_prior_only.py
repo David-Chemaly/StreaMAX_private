@@ -90,17 +90,16 @@ if __name__ == "__main__":
     plt.close(fig)
 
     # Map dirx, diry, dirz -> q  (should be uniform on [q_min, q_max])
-    q_samps = np.asarray(get_q(samps[:, 2], samps[:, 3], samps[:, 4]))
+    q_min, q_max = 0.5, 1.5
+    q_samps = np.asarray(get_q(samps[:, 2], samps[:, 3], samps[:, 4],
+                               q_min=q_min, q_max=q_max))
 
-    q_min, q_max = 0.5, 2.0
     plt.figure(figsize=(8, 6))
     plt.hist(q_samps, bins=40, density=True, alpha=0.7,
-             color='blue', range=(q_min, q_max), label='Prior-only samples')
-    plt.axhline(1.0 / (q_max - q_min), color='red', linestyle='--', lw=2,
-                label=f'Uniform on $[{q_min}, {q_max}]$')
+             color='blue', range=(q_min, q_max))
+    plt.axhline(1.0 / (q_max - q_min), color='red', linestyle='--', lw=2)
     plt.xlabel(r'Halo flattening $q$')
     plt.ylabel('Density')
-    plt.legend(loc='best', fontsize=14)
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f'q_prior_only_nlive{nlive}.pdf'),
                 bbox_inches='tight', dpi=300)
