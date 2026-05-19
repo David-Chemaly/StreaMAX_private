@@ -1,12 +1,16 @@
 """
 Front/back degeneracy test for referee Comment 6.
 
-Re-fits the same example stream (seed 46) used elsewhere in the paper,
-but with the z0 prior widened from the positive half-normal N+(0, 150)
-to the full normal N(0, 150) so that z0 can take negative values.
-With projected data only, this should reveal two perfectly symmetric
-posterior modes at +z0 and -z0, while leaving the marginal posteriors
-on all halo parameters (including q) unchanged.
+Re-fits an example stream with the z0 prior widened from the positive
+half-normal N+(0, 150) to the full normal N(0, 150) so that z0 can take
+negative values. With projected data only, this should reveal two
+symmetric posterior modes at +z0 and -z0, while leaving the marginal
+posteriors on all halo parameters (including q) unchanged.
+
+Uses seed 85 (|z0| ~ 180 kpc) rather than the paper's seed 46 (|z0| ~ 38
+kpc) so that the +z/-z mirror modes are well separated and visually
+obvious. q is constrained to [0.5, 1.5] to match the prior used in the
+revised paper.
 
 Usage on the cluster:
     python referee_comment6_widen_z.py
@@ -23,13 +27,40 @@ import jax.numpy as jnp
 import dynesty
 import dynesty.utils as dyut
 
-from spray import generate_stream_spray
-from likelihoods import log_likelihood_spray_base
+from likelihoods import BAD_VAL
+from spray_base import generate_stream_spray_base
 from utils import get_q, get_track
 
 import corner
 import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size': 18})
+
+
+# The canonical log_likelihood_spray_base calls get_q with its default
+# q_max=2.0. The referee asked for q in [0.5, 1.5], so we wrap the same
+# pipeline locally with q_max=1.5 rather than mutating the shared helper.
+Q_MIN = 0.5
+Q_MAX = 1.5
+
+
+def log_likelihood_spray_base_q15(params, dict_data, seed=13, min_count=100):
+    q = get_q(params[2], params[3], params[4], q_min=Q_MIN, q_max=Q_MAX)
+    params = np.concatenate([params[:2], [q], params[2:8], [0.], params[8:], [1.]])
+
+    theta_stream, xv_stream, _, _ = generate_stream_spray_base(params, seed)
+    _, _, r_bin, _ = get_track(theta_stream, xv_stream[:, 0], xv_stream[:, 1])
+
+    arg_take = ~np.isnan(dict_data['r_bin']) * (dict_data['count'] > min_count)
+    n_bad = np.sum(np.isnan(r_bin[arg_take]))
+
+    if np.all(np.isnan(r_bin)):
+        return BAD_VAL * len(r_bin)
+    if n_bad == 0:
+        return -0.5 * np.sum(
+            ((r_bin[arg_take] - dict_data['r_bin'][arg_take]) /
+             dict_data['r_sig'][arg_take])**2
+        )
+    return BAD_VAL * n_bad
 
 
 def prior_transform_widez(p):
@@ -79,7 +110,7 @@ def dynesty_fit(dict_data, ndim=13, nlive=2000, sigma=2):
     mp.set_start_method("spawn", force=True)
     with mp.Pool(nthreads) as poo:
         dns = dynesty.DynamicNestedSampler(
-            log_likelihood_spray_base,
+            log_likelihood_spray_base_q15,
             prior_transform_widez,
             ndim,
             logl_args=(dict_data, sigma),
@@ -106,7 +137,7 @@ def dynesty_fit(dict_data, ndim=13, nlive=2000, sigma=2):
 
 
 if __name__ == "__main__":
-    seed = 46
+    seed = 85
     ndim = 13
     nlive = 2000
     sigma = 2  # standard 2% noise, matches the paper example
@@ -175,7 +206,8 @@ if __name__ == "__main__":
     # q posterior, for comparison with the baseline fit
     q_samps = np.asarray(get_q(dict_results['samps'][:, 2],
                                dict_results['samps'][:, 3],
-                               dict_results['samps'][:, 4]))
+                               dict_results['samps'][:, 4],
+                               q_min=Q_MIN, q_max=Q_MAX))
     plt.figure(figsize=(8, 6))
     plt.hist(q_samps, bins=30, density=True, alpha=0.7, color='blue')
     plt.axvline(dict_data['params'][2], color='red', linestyle='--', lw=2,
